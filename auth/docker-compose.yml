@@ -1,0 +1,66 @@
+# Автономный стек для разработки auth отдельно от остальных сервисов.
+# Вся система (gateway, secrets, notification, ...) будет в корневом
+# compose-файле; сети и секреты здесь названы так же, как в спецификации.
+#
+#   make secrets && docker compose up --build
+#   curl -s localhost:8000/auth/register -d '{"email":"a@b.co","password":"0123456789"}'
+
+name: vault-auth
+
+services:
+  auth:
+    build: .
+    environment:
+      DB_HOST: postgres-auth
+      DB_USER: auth
+      DB_NAME: auth_db
+      DB_PASSWORD_FILE: /run/secrets/postgres_auth_password
+      JWT_PRIVATE_KEY_FILE: /run/secrets/jwt_private_key
+    secrets:
+      - jwt_private_key
+      - postgres_auth_password
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+    networks:
+      - auth-data
+      - dev        # только для разработки: в общем стеке auth сидит в gw-auth за gateway
+    ports:
+      - "127.0.0.1:8000:8000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  postgres-auth:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: auth
+      POSTGRES_DB: auth_db
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_auth_password
+    secrets:
+      - postgres_auth_password
+    volumes:
+      - auth-db:/var/lib/postgresql/data
+    networks:
+      - auth-data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auth -d auth_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+networks:
+  auth-data:
+    internal: true
+  dev: {}
+
+volumes:
+  auth-db:
+
+secrets:
+  jwt_private_key:
+    file: ./.secrets/jwt_private_key.pem
+  postgres_auth_password:
+    file: ./.secrets/postgres_auth_password
