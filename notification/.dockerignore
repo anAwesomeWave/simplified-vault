@@ -1,0 +1,6 @@
+.secrets
+*.pdf
+Dockerfile
+docker-compose*.yml
+Makefile
+README.md
