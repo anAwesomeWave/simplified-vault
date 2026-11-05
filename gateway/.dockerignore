@@ -1,0 +1,7 @@
+.git
+.env
+.secrets
+bin
+coverage.out
+**/*_test.go
+**/.DS_Store
