@@ -1,0 +1,81 @@
+openapi: 3.0.3
+info:
+  title: simplified-vault auth
+  version: 1.0.0
+  description: |
+    Registration and login. Login returns an RS256 JWT (15 minutes, no refresh
+    tokens) with claims `user_id`, `email`, `sub`, `iss=auth`, `aud=secrets`,
+    `iat`, `nbf`, `exp`, `jti`.
+paths:
+  /auth/register:
+    post:
+      summary: Register by email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '201':
+          description: Registered
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id]
+                properties:
+                  user_id: { type: string, format: uuid }
+        '400':
+          description: Invalid JSON, invalid email or password shorter than 10 characters
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Email already registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /auth/login:
+    post:
+      summary: Log in and get an access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '200':
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access_token, expires_in]
+                properties:
+                  access_token: { type: string }
+                  token_type: { type: string, example: Bearer }
+                  expires_in: { type: integer, example: 900 }
+        '400':
+          description: Invalid JSON
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: Wrong email or password (same response for both)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+components:
+  schemas:
+    Credentials:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, example: anna@company.com }
+        password: { type: string, minLength: 10, format: password }
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error: { type: string, example: invalid_credentials }
+        message: { type: string, example: invalid email or password }
