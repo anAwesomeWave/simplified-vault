@@ -44,10 +44,23 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	pg := url.URL{Scheme: "postgres", User: url.UserPassword(env("POSTGRES_USER", "secrets"), pgPassword), Host: net.JoinHostPort(env("POSTGRES_HOST", "postgres-secrets"), pgPort), Path: "/" + env("POSTGRES_DB", "secrets_db")}
+	// POSTGRES_HOST may list the primary and its standby separated by commas.
+	// The driver tries them in order and keeps the node that accepts writes,
+	// so a promoted standby is picked up without reconfiguring the service.
+	var pgHosts []string
+	for _, host := range strings.Split(env("POSTGRES_HOST", "postgres-secrets"), ",") {
+		if host = strings.TrimSpace(host); host != "" {
+			pgHosts = append(pgHosts, net.JoinHostPort(host, pgPort))
+		}
+	}
+	if len(pgHosts) == 0 {
+		return Config{}, errors.New("POSTGRES_HOST must not be empty")
+	}
+	pg := url.URL{Scheme: "postgres", User: url.UserPassword(env("POSTGRES_USER", "secrets"), pgPassword), Host: strings.Join(pgHosts, ","), Path: "/" + env("POSTGRES_DB", "secrets_db")}
 	query := url.Values{}
 	query.Set("sslmode", env("POSTGRES_SSLMODE", "disable"))
 	query.Set("connect_timeout", "5")
+	query.Set("target_session_attrs", "read-write")
 	pg.RawQuery = query.Encode()
 	c.PostgresURL = pg.String()
 	rabbitPassword, err := readPassword(env("RABBITMQ_PASSWORD_FILE", "/run/secrets/rabbitmq_password"))

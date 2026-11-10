@@ -10,7 +10,9 @@ Mailpit). Реализует ФТ-13 и ФТ-17 и раздел «События
 ## События
 
 secrets публикует события в topic exchange `app.events`, ключ маршрутизации совпадает с
-типом события. notification читает их из durable-очереди `notification.events`.
+типом события. notification читает их из durable quorum-очереди `notification.events`:
+в общем стеке она реплицируется на три узла кластера RabbitMQ и переживает отказ
+любого из них.
 
 | Событие | Поля, кроме общих | Что делает notification |
 |---|---|---|

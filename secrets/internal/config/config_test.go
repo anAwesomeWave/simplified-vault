@@ -80,3 +80,23 @@ func TestInvalidConfigRejectedWithoutLeakingPassword(t *testing.T) {
 		}
 	})
 }
+
+func TestPostgresHostListTargetsWritableNode(t *testing.T) {
+	setup(t)
+	t.Setenv("POSTGRES_HOST", "postgres-secrets, postgres-secrets-replica")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg, err := url.Parse(cfg.PostgresURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pg.Host != "postgres-secrets:5432,postgres-secrets-replica:5432" || pg.Query().Get("target_session_attrs") != "read-write" {
+		t.Fatalf("unexpected PostgreSQL hosts or session attributes: %q", pg.Host)
+	}
+	t.Setenv("POSTGRES_HOST", " , ")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected an empty host list to fail")
+	}
+}

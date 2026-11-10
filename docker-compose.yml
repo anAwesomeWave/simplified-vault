@@ -65,7 +65,8 @@ services:
     environment:
       HTTP_ADDR: ":8000"
       PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-https://localhost}"
-      POSTGRES_HOST: postgres-secrets
+      # Оба узла кластера: драйвер выбирает тот, что принимает запись.
+      POSTGRES_HOST: postgres-secrets,postgres-secrets-replica
       POSTGRES_PORT: "5432"
       POSTGRES_USER: secrets
       POSTGRES_DB: secrets_db
@@ -83,9 +84,15 @@ services:
     depends_on:
       postgres-secrets:
         condition: service_healthy
+      postgres-secrets-replica:
+        condition: service_healthy
       redis:
         condition: service_healthy
-      rabbitmq:
+      rabbitmq-1:
+        condition: service_healthy
+      rabbitmq-2:
+        condition: service_healthy
+      rabbitmq-3:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "/secrets", "healthcheck"]
@@ -117,7 +124,11 @@ services:
     secrets: [rabbitmq_password]
     networks: [events-consume, mail]
     depends_on:
-      rabbitmq:
+      rabbitmq-1:
+        condition: service_healthy
+      rabbitmq-2:
+        condition: service_healthy
+      rabbitmq-3:
         condition: service_healthy
       mailpit:
         condition: service_healthy
@@ -150,22 +161,43 @@ services:
       retries: 10
     restart: unless-stopped
 
-  postgres-secrets:
+  # secrets_db: primary + hot standby на потоковой репликации WAL (асинхронной).
+  # Переключение ручное: scripts/db.sh promote. Роли узлов меняются местами,
+  # поэтому оба сервиса описаны одинаково и различаются только INITIAL_ROLE.
+  postgres-secrets: &postgres-secrets
     image: postgres:17-alpine
-    environment:
+    entrypoint: ["/bin/sh", "/usr/local/bin/ha-entrypoint.sh"]
+    command: [postgres, -c, hba_file=/etc/postgresql/pg_hba.conf, -c, wal_keep_size=256MB]
+    environment: &postgres-secrets-env
       POSTGRES_USER: secrets
       POSTGRES_DB: secrets_db
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_secrets_password
+      INITIAL_ROLE: primary
+      PEER_HOST: postgres-secrets-replica
     secrets: [postgres_secrets_password]
     volumes:
       - secrets-data:/var/lib/postgresql/data
+      - ./deploy/postgres/ha-entrypoint.sh:/usr/local/bin/ha-entrypoint.sh:ro
+      - ./deploy/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
     networks: [secrets-db]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U secrets -d secrets_db"]
       interval: 5s
       timeout: 3s
       retries: 10
+      start_period: 120s
     restart: unless-stopped
+
+  postgres-secrets-replica:
+    <<: *postgres-secrets
+    environment:
+      <<: *postgres-secrets-env
+      INITIAL_ROLE: standby
+      PEER_HOST: postgres-secrets
+    volumes:
+      - secrets-replica-data:/var/lib/postgresql/data
+      - ./deploy/postgres/ha-entrypoint.sh:/usr/local/bin/ha-entrypoint.sh:ro
+      - ./deploy/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
 
   redis:
     image: redis:8-alpine
@@ -178,25 +210,24 @@ services:
       retries: 10
     restart: unless-stopped
 
-  rabbitmq:
+  # Кластер RabbitMQ из трёх узлов (2N+1): quorum-очереди работают, пока жива
+  # любая пара. Клиенты подключаются по общему имени `rabbitmq`: Docker DNS
+  # отдаёт адреса только запущенных узлов.
+  rabbitmq-1: &rabbitmq
     image: rabbitmq:4.1-alpine
-    hostname: rabbitmq
-    entrypoint:
-      - /bin/sh
-      - -ec
-      - |
-        umask 077
-        password=$$(cat /run/secrets/rabbitmq_password)
-        case "$$password" in ''|*[!a-fA-F0-9]*) exit 1 ;; esac
-        printf 'default_user = secrets\ndefault_pass = %s\n' "$$password" > /etc/rabbitmq/secrets.conf
-        unset password
-        chown rabbitmq:rabbitmq /etc/rabbitmq/secrets.conf
-        export RABBITMQ_CONFIG_FILE=/etc/rabbitmq/secrets.conf
-        exec docker-entrypoint.sh rabbitmq-server
-    secrets: [rabbitmq_password]
+    hostname: rabbitmq-1
+    entrypoint: ["/bin/sh", "/usr/local/bin/cluster-entrypoint.sh"]
+    environment:
+      RABBITMQ_CLUSTER_NODES: rabbitmq-1 rabbitmq-2 rabbitmq-3
+    secrets: [rabbitmq_password, rabbitmq_erlang_cookie]
     volumes:
-      - rabbitmq-data:/var/lib/rabbitmq
-    networks: [events-publish, events-consume]
+      - rabbitmq-1-data:/var/lib/rabbitmq
+      - ./deploy/rabbitmq/cluster-entrypoint.sh:/usr/local/bin/cluster-entrypoint.sh:ro
+    networks:
+      events-publish:
+        aliases: [rabbitmq]
+      events-consume:
+        aliases: [rabbitmq]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -204,6 +235,20 @@ services:
       retries: 12
       start_period: 30s
     restart: unless-stopped
+
+  rabbitmq-2:
+    <<: *rabbitmq
+    hostname: rabbitmq-2
+    volumes:
+      - rabbitmq-2-data:/var/lib/rabbitmq
+      - ./deploy/rabbitmq/cluster-entrypoint.sh:/usr/local/bin/cluster-entrypoint.sh:ro
+
+  rabbitmq-3:
+    <<: *rabbitmq
+    hostname: rabbitmq-3
+    volumes:
+      - rabbitmq-3-data:/var/lib/rabbitmq
+      - ./deploy/rabbitmq/cluster-entrypoint.sh:/usr/local/bin/cluster-entrypoint.sh:ro
 
   mailpit:
     image: axllent/mailpit:v1.33
@@ -240,7 +285,10 @@ networks:
 volumes:
   auth-data: {}
   secrets-data: {}
-  rabbitmq-data: {}
+  secrets-replica-data: {}
+  rabbitmq-1-data: {}
+  rabbitmq-2-data: {}
+  rabbitmq-3-data: {}
 
 secrets:
   jwt_private_key:
@@ -255,6 +303,8 @@ secrets:
     file: ./.secrets/postgres_secrets_password
   rabbitmq_password:
     file: ./.secrets/rabbitmq_password
+  rabbitmq_erlang_cookie:
+    file: ./.secrets/rabbitmq_erlang_cookie
   tls_certificate:
     file: ./.secrets/tls_certificate.pem
   tls_private_key:

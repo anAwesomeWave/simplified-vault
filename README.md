@@ -8,9 +8,9 @@ flowchart LR
     Gateway -->|auth API| Auth[auth]
     Gateway -->|JWT → доверенные заголовки| Secrets[secrets]
     Auth --> AuthDB[(PostgreSQL auth_db)]
-    Secrets --> SecretsDB[(PostgreSQL secrets_db)]
+    Secrets --> SecretsDB[(PostgreSQL secrets_db<br/>primary + standby)]
     Secrets --> Redis[(Redis)]
-    Secrets -->|app.events| RabbitMQ[RabbitMQ]
+    Secrets -->|app.events| RabbitMQ[RabbitMQ<br/>кластер из 3 узлов]
     RabbitMQ -->|notification.events| Notification[notification]
     Notification -->|SMTP| Mailpit[Mailpit]
 ```
@@ -30,7 +30,7 @@ make ps
 ```
 
 `make up` создаёт недостающие ключи и пароли, собирает четыре приложения и
-ожидает готовности всех **девяти контейнеров**. Миграции обеих PostgreSQL
+ожидает готовности всех **двенадцати контейнеров**. Миграции обеих PostgreSQL
 применяются приложениями при старте. Gateway: [https://localhost](https://localhost),
 письма Mailpit: [http://127.0.0.1:8025](http://127.0.0.1:8025).
 Первый запуск создаёт самоподписанный TLS-сертификат для localhost и 127.0.0.1;
@@ -68,10 +68,10 @@ Docker secrets. Auth получает приватный RSA-ключ, gateway �
 | `gw-auth` | gateway, auth |
 | `gw-secrets` | gateway, secrets |
 | `auth-data` | auth, postgres-auth |
-| `secrets-db` | secrets, postgres-secrets |
+| `secrets-db` | secrets, postgres-secrets, postgres-secrets-replica |
 | `secrets-cache` | secrets, redis |
-| `events-publish` | secrets, rabbitmq |
-| `events-consume` | notification, rabbitmq |
+| `events-publish` | secrets, rabbitmq-1..3 |
+| `events-consume` | notification, rabbitmq-1..3 |
 | `mail` | notification, mailpit |
 | `mail-ui` | mailpit; UI опубликован на loopback |
 
@@ -100,6 +100,13 @@ Secrets публикует в `app.events` с подтверждениями; п
 | `make config` | Проверка Compose |
 | `make test` | Go vet и тесты с race detector во всех четырёх модулях |
 | `make smoke` | Регистрация → вход → секрет → одобрение/отзыв → письма Mailpit |
+| `make db-status` | Роли узлов secrets_db и отставание реплики |
+| `make db-promote` / `make db-rejoin` | Переключение secrets_db на standby / возврат старого primary репликой |
+| `make backup` | Проверенные копии обеих баз в `backups/` |
+| `make restore FILE=...` | Восстановление базы из копии |
+| `make demo-db-failover` | Демо: отказ primary СУБД и переключение на standby |
+| `make demo-mq-failover` | Демо: отказ узла-лидера RabbitMQ |
+| `make demo-backup` | Демо: копия → потеря данных → восстановление |
 
 Для `make test` нужен Go 1.26+, для `make smoke` — Python 3 без дополнительных
 пакетов. Smoke использует настоящие auth и notification, не очищает общую очередь
@@ -107,6 +114,22 @@ Secrets публикует в `app.events` с подтверждениями; п
 операции удаления аккаунта в API нет. Повторять smoke следует с интервалом не меньше
 минуты из-за лимита входа по IP. Низкоуровневый destructive integration-тест consumer
 notification не запускается общим `make test`; он предназначен для отдельного брокера.
+
+## Надёжность
+
+`secrets_db` работает парой primary + hot standby на потоковой репликации;
+secrets знает оба узла и сам находит тот, что принимает запись. Переключение
+ручное (`make db-promote`) и изолирует старый primary, чтобы не было двух мастеров.
+RabbitMQ — кластер из трёх узлов с quorum-очередями: отказ любого узла, включая
+лидера очереди, не останавливает доставку. `make backup` делает полные копии обеих
+баз с проверочным восстановлением. Схема, демонстрация, SLO, MTBF, MTTR, RTO и RPO
+с обоснованием — в [docs/reliability.md](docs/reliability.md).
+
+Стек с кластером использует новые volumes (`secrets-replica-data`,
+`rabbitmq-1..3-data`). Данные прежнего одиночного `rabbitmq-data` не переносятся;
+неотправленные события остаются в outbox secrets. Если в старом брокере уже была
+classic-очередь `notification.events`, удалите её — тип очереди при повторном
+объявлении не меняется.
 
 Контракты и локальная разработка описаны в README соответствующих сервисов:
 [gateway](gateway/README.md), [auth](auth/README.md), [secrets](secrets/README.md),

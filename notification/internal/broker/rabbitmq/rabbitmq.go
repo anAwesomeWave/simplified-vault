@@ -73,13 +73,20 @@ func DeclareTopology(ch *amqp.Channel) error {
 	if err := ch.ExchangeDeclare(DeadLetterExchange, amqp.ExchangeFanout, true, false, false, false, nil); err != nil {
 		return fmt.Errorf("rabbitmq: declare exchange %s: %w", DeadLetterExchange, err)
 	}
-	if _, err := ch.QueueDeclare(DeadLetterQueue, true, false, false, false, nil); err != nil {
+	// Обе очереди - quorum: копия хранится на каждом узле кластера RabbitMQ,
+	// при отказе узла-лидера очередь продолжает работать на оставшемся большинстве.
+	// Тип очереди нельзя изменить повторным объявлением: существующую
+	// classic-очередь с тем же именем нужно удалить
+	if _, err := ch.QueueDeclare(DeadLetterQueue, true, false, false, false, amqp.Table{
+		"x-queue-type": amqp.QueueTypeQuorum,
+	}); err != nil {
 		return fmt.Errorf("rabbitmq: declare queue %s: %w", DeadLetterQueue, err)
 	}
 	if err := ch.QueueBind(DeadLetterQueue, "", DeadLetterExchange, false, nil); err != nil {
 		return fmt.Errorf("rabbitmq: bind %s: %w", DeadLetterQueue, err)
 	}
 	if _, err := ch.QueueDeclare(EventsQueue, true, false, false, false, amqp.Table{
+		"x-queue-type":           amqp.QueueTypeQuorum,
 		"x-dead-letter-exchange": DeadLetterExchange,
 	}); err != nil {
 		return fmt.Errorf("rabbitmq: declare queue %s: %w", EventsQueue, err)

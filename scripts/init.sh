@@ -35,7 +35,7 @@ if [ "$(wc -c < .secrets/master_key | tr -d ' ')" != 32 ]; then
   echo 'master_key must contain exactly 32 raw bytes.' >&2
   exit 1
 fi
-for name in postgres_auth_password postgres_secrets_password rabbitmq_password; do
+for name in postgres_auth_password postgres_secrets_password rabbitmq_password rabbitmq_erlang_cookie; do
   if [ ! -f ".secrets/$name" ]; then
     openssl rand -hex 32 > ".secrets/$name"
   fi
@@ -59,7 +59,7 @@ fi
 # The containing host directory remains private (0700).
 chmod 444 "$private" "$public" .secrets/master_key \
   .secrets/postgres_auth_password .secrets/postgres_secrets_password \
-  .secrets/rabbitmq_password "$certificate" "$tls_key"
+  .secrets/rabbitmq_password .secrets/rabbitmq_erlang_cookie "$certificate" "$tls_key"
 if [ ! -f .env ]; then
   cp .env.example .env
 fi
