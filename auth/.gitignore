@@ -1,0 +1,3 @@
+# generated keys and passwords — never commit
+.secrets/
+/bin/

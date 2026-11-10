@@ -1,0 +1,85 @@
+# Автономный стек для разработки notification отдельно от остальных сервисов.
+# Вся система (gateway, auth, secrets, ...) будет в корневом compose-файле;
+# сети и секреты здесь названы так же, как в спецификации.
+#
+#   make secrets && docker compose up --build
+#   Mailpit UI: http://127.0.0.1:8025
+
+name: vault-notification
+
+services:
+  notification:
+    build: .
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: vault
+      RABBITMQ_PASSWORD_FILE: /run/secrets/rabbitmq_password
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      PUBLIC_BASE_URL: https://localhost
+    secrets:
+      - rabbitmq_password
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    networks:
+      - events
+      - mail
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    # больше, чем shutdownTimeout (15s): уже полученные письма успевают уйти
+    stop_grace_period: 20s
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    hostname: rabbitmq   # имя узла и каталог данных не меняются между пересозданиями
+    # Образ больше не поддерживает RABBITMQ_DEFAULT_PASS_FILE: пароль читается
+    # из Docker secret в окружение только процесса брокера (в compose и
+    # docker inspect его нет)
+    entrypoint: ["bash", "-c", "export RABBITMQ_DEFAULT_PASS=\"$$(< /run/secrets/rabbitmq_password)\"; exec docker-entrypoint.sh rabbitmq-server"]
+    environment:
+      RABBITMQ_DEFAULT_USER: vault
+    secrets:
+      - rabbitmq_password
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - events
+      - dev        # только для разработки: AMQP и management UI на 127.0.0.1
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.33
+    networks:
+      - mail
+      - dev        # только для разработки: веб-интерфейс и SMTP на 127.0.0.1
+    ports:
+      - "127.0.0.1:8025:8025"
+      - "127.0.0.1:1025:1025"
+    restart: unless-stopped
+
+networks:
+  events:
+    internal: true
+  mail:
+    internal: true
+  dev: {}
+
+volumes:
+  rabbitmq-data:
+
+secrets:
+  rabbitmq_password:
+    file: ./.secrets/rabbitmq_password
