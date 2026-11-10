@@ -59,8 +59,10 @@ RS256, срок 15 минут, refresh-токенов нет. Claims:
  "iss": "auth", "aud": ["secrets"], "iat": 0, "nbf": 0, "exp": 0, "jti": "<uuid>"}
 ```
 
-Сервис secrets должен проверять: `alg == RS256` (жёстко, без доверия заголовку), подпись
-публичным ключом `jwt_public_key`, `exp`, `iss == "auth"`, `aud` содержит `"secrets"`.
+Gateway проверяет алгоритм RS256, подпись публичным ключом `jwt_public_key`,
+обязательные `exp`, `iss == "auth"` и `aud`, содержащий `"secrets"`, а также
+временные ограничения `iat`/`nbf`, если они переданы. Сервис secrets получает
+проверенные `user_id` и `email` в заголовках `X-User-ID` и `X-User-Email` от gateway.
 
 ## Безопасность
 
@@ -102,7 +104,7 @@ make down
 
 `docker-compose.yml` здесь — для автономной разработки. В общем стеке auth подключается
 только к сетям `gw-auth` и `auth-data`, без публикации порта; `jwt_public_key.pem`
-отдаётся сервису secrets как Docker secret `jwt_public_key`.
+отдаётся gateway как Docker secret `jwt_public_key`.
 
 ## Тесты
 

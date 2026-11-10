@@ -47,7 +47,7 @@ func verifierAndToken(t *testing.T) (*auth.Verifier, string) {
 		t.Fatal(err)
 	}
 	token, err := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
-		"user_id": userID, "email": userEmail, "exp": time.Now().Add(15 * time.Minute).Unix(),
+		"user_id": userID, "email": userEmail, "iss": "auth", "aud": []string{"secrets"}, "exp": time.Now().Add(15 * time.Minute).Unix(),
 	}).SignedString(signingKey)
 	if err != nil {
 		t.Fatal(err)

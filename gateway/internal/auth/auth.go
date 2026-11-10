@@ -36,6 +36,7 @@ func New(publicPEM []byte) (*Verifier, error) {
 	return &Verifier{key: key, parser: jwt.NewParser(
 		jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}),
 		jwt.WithExpirationRequired(), jwt.WithIssuedAt(),
+		jwt.WithIssuer("auth"), jwt.WithAudience("secrets"),
 	)}, nil
 }
 

@@ -77,12 +77,15 @@ func healthcheck() error {
 	if addr == "" {
 		addr = ":8000"
 	}
-	_, port, err := net.SplitHostPort(addr)
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return err
 	}
-	// A local TCP check also works when the listener terminates TLS.
-	connection, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", port), 2*time.Second)
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	// Local liveness only; external clients verify the HTTPS certificate.
+	connection, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), 2*time.Second)
 	if err != nil {
 		return err
 	}

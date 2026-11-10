@@ -24,7 +24,7 @@ import (
 	"simple-vault/gateway/internal/ratelimit"
 )
 
-// Auth is a fixture until the separate auth service is implemented. Secrets is real.
+// Auth is a local fixture; scripts/smoke.py checks the complete stack with real auth.
 func TestIntegrationWithSecrets(t *testing.T) {
 	upstream := os.Getenv("TEST_SECRETS_URL")
 	if upstream == "" {
@@ -58,7 +58,7 @@ func TestIntegrationWithSecrets(t *testing.T) {
 			return
 		}
 		token, err := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
-			"user_id": accounts[credentials.Email], "email": credentials.Email, "exp": time.Now().Add(15 * time.Minute).Unix(),
+			"user_id": accounts[credentials.Email], "email": credentials.Email, "iss": "auth", "aud": []string{"secrets"}, "exp": time.Now().Add(15 * time.Minute).Unix(),
 		}).SignedString(key)
 		if err != nil {
 			t.Error(err)

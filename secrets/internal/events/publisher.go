@@ -24,10 +24,6 @@ const (
 	maxRetryDelay    = 30 * time.Second
 )
 
-var routingKeys = [...]string{
-	"secret.created", "access.requested", "access.decided", "secret.viewed", "access.revoked",
-}
-
 type Publisher struct {
 	amqpURL string
 	logger  *slog.Logger
@@ -129,14 +125,9 @@ func (p *Publisher) connect(parent context.Context) (*brokerSession, error) {
 	if err := ch.ExchangeDeclare(Exchange, "topic", true, false, false, false, nil); err != nil {
 		return nil, err
 	}
-	if _, err := ch.QueueDeclare(Queue, true, false, false, false, nil); err != nil {
-		return nil, err
-	}
-	for _, key := range routingKeys {
-		if err := ch.QueueBind(Queue, key, Exchange, false, nil); err != nil {
-			return nil, err
-		}
-	}
+	// notification owns its durable queue, bindings and dead-letter policy.
+	// Mandatory publishing retains unroutable events in the outbox until a
+	// matching queue exists, without creating conflicting consumer topology.
 	if err := ch.Confirm(false); err != nil {
 		return nil, err
 	}

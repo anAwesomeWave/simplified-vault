@@ -25,7 +25,7 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// jwtIssuer подписывает access-токены приватным RSA-ключом (RS256). Сервис secrets
+// jwtIssuer подписывает access-токены приватным RSA-ключом (RS256). Gateway
 // проверяет их публичным ключом и берёт user_id и email прямо из claims
 type jwtIssuer struct {
 	key      *rsa.PrivateKey

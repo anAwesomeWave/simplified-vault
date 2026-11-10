@@ -69,7 +69,7 @@ func TestVerifySignedTokens(t *testing.T) {
 	id := uuid.NewString()
 	now := time.Now()
 	base := func() jwt.MapClaims {
-		return jwt.MapClaims{"user_id": strings.ToUpper(id), "email": "user@example.com", "exp": now.Add(15 * time.Minute).Unix(), "iat": now.Add(-time.Minute).Unix(), "nbf": now.Add(-time.Minute).Unix()}
+		return jwt.MapClaims{"user_id": strings.ToUpper(id), "email": "user@example.com", "iss": "auth", "aud": []string{"secrets"}, "exp": now.Add(15 * time.Minute).Unix(), "iat": now.Add(-time.Minute).Unix(), "nbf": now.Add(-time.Minute).Unix()}
 	}
 	cases := []struct {
 		name   string
@@ -81,6 +81,11 @@ func TestVerifySignedTokens(t *testing.T) {
 		{name: "valid and canonical UUID", valid: true},
 		{name: "iat optional", change: func(c jwt.MapClaims) { delete(c, "iat") }, valid: true},
 		{name: "nbf optional", change: func(c jwt.MapClaims) { delete(c, "nbf") }, valid: true},
+		{name: "multiple audiences include secrets", change: func(c jwt.MapClaims) { c["aud"] = []string{"other", "secrets"} }, valid: true},
+		{name: "missing issuer", change: func(c jwt.MapClaims) { delete(c, "iss") }},
+		{name: "wrong issuer", change: func(c jwt.MapClaims) { c["iss"] = "other" }},
+		{name: "missing audience", change: func(c jwt.MapClaims) { delete(c, "aud") }},
+		{name: "wrong audience", change: func(c jwt.MapClaims) { c["aud"] = []string{"other"} }},
 		{name: "expired", change: func(c jwt.MapClaims) { c["exp"] = now.Add(-time.Hour).Unix() }},
 		{name: "missing exp", change: func(c jwt.MapClaims) { delete(c, "exp") }},
 		{name: "future iat", change: func(c jwt.MapClaims) { c["iat"] = now.Add(time.Hour).Unix() }},

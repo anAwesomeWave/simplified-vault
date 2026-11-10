@@ -1,0 +1,261 @@
+name: simple-vault-stack
+
+services:
+  gateway:
+    build: ./gateway
+    environment:
+      HTTP_ADDR: ":8000"
+      AUTH_URL: http://auth:8000
+      SECRETS_URL: http://secrets:8000
+      JWT_PUBLIC_KEY_FILE: /run/secrets/jwt_public_key
+      TLS_CERT_FILE: /run/secrets/tls_certificate
+      TLS_KEY_FILE: /run/secrets/tls_private_key
+      LOGIN_REQUESTS_PER_MINUTE: "${LOGIN_REQUESTS_PER_MINUTE:-5}"
+    secrets: [jwt_public_key, tls_certificate, tls_private_key]
+    ports:
+      - "${HTTPS_PORT:-443}:8000"
+    networks: [edge, gw-auth, gw-secrets]
+    depends_on:
+      auth:
+        condition: service_healthy
+      secrets:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/gateway", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 25s
+    restart: unless-stopped
+
+  auth:
+    build: ./auth
+    environment:
+      HTTP_ADDR: ":8000"
+      DB_HOST: postgres-auth
+      DB_PORT: "5432"
+      DB_USER: auth
+      DB_NAME: auth_db
+      DB_SSLMODE: disable
+      DB_PASSWORD_FILE: /run/secrets/postgres_auth_password
+      JWT_PRIVATE_KEY_FILE: /run/secrets/jwt_private_key
+    secrets: [jwt_private_key, postgres_auth_password]
+    networks: [gw-auth, auth-data]
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/auth", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 25s
+    restart: unless-stopped
+
+  secrets:
+    build: ./secrets
+    environment:
+      HTTP_ADDR: ":8000"
+      PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-https://localhost}"
+      POSTGRES_HOST: postgres-secrets
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: secrets
+      POSTGRES_DB: secrets_db
+      POSTGRES_SSLMODE: disable
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_secrets_password
+      REDIS_ADDR: redis:6379
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: secrets
+      RABBITMQ_VHOST: /
+      RABBITMQ_PASSWORD_FILE: /run/secrets/rabbitmq_password
+      MASTER_KEY_FILE: /run/secrets/master_key
+    secrets: [postgres_secrets_password, rabbitmq_password, master_key]
+    networks: [gw-secrets, secrets-db, secrets-cache, events-publish]
+    depends_on:
+      postgres-secrets:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/secrets", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 25s
+    restart: unless-stopped
+
+  notification:
+    build: ./notification
+    environment:
+      HEALTH_ADDR: "127.0.0.1:8000"
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: secrets
+      RABBITMQ_VHOST: /
+      RABBITMQ_PASSWORD_FILE: /run/secrets/rabbitmq_password
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_STARTTLS: "false"
+      SMTP_TIMEOUT: 10s
+      DRAIN_TIMEOUT: 10s
+      PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-https://localhost}"
+    secrets: [rabbitmq_password]
+    networks: [events-consume, mail]
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/notification", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 25s
+    restart: unless-stopped
+
+  postgres-auth:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: auth
+      POSTGRES_DB: auth_db
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_auth_password
+    secrets: [postgres_auth_password]
+    volumes:
+      - auth-data:/var/lib/postgresql/data
+    networks: [auth-data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auth -d auth_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  postgres-secrets:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: secrets
+      POSTGRES_DB: secrets_db
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_secrets_password
+    secrets: [postgres_secrets_password]
+    volumes:
+      - secrets-data:/var/lib/postgresql/data
+    networks: [secrets-db]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U secrets -d secrets_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    command: [redis-server, --save, "", --appendonly, "no"]
+    networks: [secrets-cache]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4.1-alpine
+    hostname: rabbitmq
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        umask 077
+        password=$$(cat /run/secrets/rabbitmq_password)
+        case "$$password" in ''|*[!a-fA-F0-9]*) exit 1 ;; esac
+        printf 'default_user = secrets\ndefault_pass = %s\n' "$$password" > /etc/rabbitmq/secrets.conf
+        unset password
+        chown rabbitmq:rabbitmq /etc/rabbitmq/secrets.conf
+        export RABBITMQ_CONFIG_FILE=/etc/rabbitmq/secrets.conf
+        exec docker-entrypoint.sh rabbitmq-server
+    secrets: [rabbitmq_password]
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks: [events-publish, events-consume]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.33
+    ports:
+      - "127.0.0.1:${MAILPIT_PORT:-8025}:8025"
+    networks: [mail, mail-ui]
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+networks:
+  edge: {}
+  mail-ui: {}
+  gw-auth:
+    internal: true
+  gw-secrets:
+    internal: true
+  auth-data:
+    internal: true
+  secrets-db:
+    internal: true
+  secrets-cache:
+    internal: true
+  events-publish:
+    internal: true
+  events-consume:
+    internal: true
+  mail:
+    internal: true
+
+volumes:
+  auth-data: {}
+  secrets-data: {}
+  rabbitmq-data: {}
+
+secrets:
+  jwt_private_key:
+    file: ./.secrets/jwt_private_key.pem
+  jwt_public_key:
+    file: ./.secrets/jwt_public_key.pem
+  master_key:
+    file: ./.secrets/master_key
+  postgres_auth_password:
+    file: ./.secrets/postgres_auth_password
+  postgres_secrets_password:
+    file: ./.secrets/postgres_secrets_password
+  rabbitmq_password:
+    file: ./.secrets/rabbitmq_password
+  tls_certificate:
+    file: ./.secrets/tls_certificate.pem
+  tls_private_key:
+    file: ./.secrets/tls_private_key.pem

@@ -3,7 +3,7 @@
 # Существующие файлы не перезаписываются, поэтому токены и БД остаются рабочими между запусками.
 #
 #   jwt_private_key.pem      -> Docker secret jwt_private_key (auth)
-#   jwt_public_key.pem       -> Docker secret jwt_public_key  (сервис secrets)
+#   jwt_public_key.pem       -> Docker secret jwt_public_key  (gateway)
 #   postgres_auth_password   -> Docker secret postgres_auth_password
 set -euo pipefail
 

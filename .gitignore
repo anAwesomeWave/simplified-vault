@@ -1,0 +1,4 @@
+/.env
+/.secrets/
+/scripts/__pycache__/
+.DS_Store
