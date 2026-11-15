@@ -9,7 +9,7 @@ SERVICES := gateway auth secrets notification
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "%-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-init: ## Generate missing local keys, passwords, certificate and .env
+init: ## Generate missing local keys, passwords and .env
 	@sh scripts/init.sh
 
 config: init ## Validate the unified Compose configuration

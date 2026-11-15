@@ -4,7 +4,7 @@
 
 ```mermaid
 flowchart LR
-    Client[Клиент] -->|HTTPS| Gateway[gateway]
+    Client[Клиент] -->|HTTP| Gateway[gateway]
     Gateway -->|auth API| Auth[auth]
     Gateway -->|JWT → доверенные заголовки| Secrets[secrets]
     Auth --> AuthDB[(PostgreSQL auth_db)]
@@ -17,7 +17,8 @@ flowchart LR
 
 | Компонент | Ответственность |
 | --- | --- |
-| `gateway` | HTTPS, проверка RS256 JWT, лимит входа, маршрутизация |
+| `gateway` | HTTP, проверка RS256 JWT, лимит входа, маршрутизация |
+| Svelte-интерфейс | Регистрация, вход, секреты, управление доступом и ответы API; раздаётся gateway |
 | `auth` | Регистрация, argon2id, JWT на 15 минут, своя PostgreSQL |
 | `secrets` | AES-256-GCM, TTL, запросы доступа, аудит, Redis и outbox |
 | `notification` | Чтение RabbitMQ и отправка писем через Mailpit |
@@ -31,16 +32,31 @@ make ps
 
 `make up` создаёт недостающие ключи и пароли, собирает четыре приложения и
 ожидает готовности всех **двенадцати контейнеров**. Миграции обеих PostgreSQL
-применяются приложениями при старте. Gateway: [https://localhost](https://localhost),
+применяются приложениями при старте. Gateway: [http://localhost](http://localhost),
 письма Mailpit: [http://127.0.0.1:8025](http://127.0.0.1:8025).
-Первый запуск создаёт самоподписанный TLS-сертификат для localhost и 127.0.0.1;
-для curl используйте `--cacert .secrets/tls_certificate.pem`.
-TLS завершается на gateway; внутри стека сервисы используют HTTP, без mTLS.
-Healthcheck gateway проверяет локальный TCP-порт. HTTPS и сертификат проверяет
-внешний smoke-тест.
+Локальный стек использует HTTP на порту 80, сертификаты не требуются.
+На [http://localhost](http://localhost) открывается интерфейс на Svelte:
+регистрация, вход, создание и чтение секретов, управление доступом и история
+просмотров. Под формами доступен последний ответ API со статусом HTTP.
+Для проверки обмена между двумя пользователями откройте второе приватное окно
+браузера. Ссылки из писем открывают этот же интерфейс.
+JWT сохраняется в текущей вкладке до истечения сессии; пароли и тексты секретов
+в браузерное хранилище не записываются.
+Healthcheck gateway проверяет локальный TCP-порт; внешний smoke-тест проверяет API.
 
-Несекретные параметры находятся в `.env` (шаблон — `.env.example`). Если порт 443
-занят, например, задайте `HTTPS_PORT=8443` и `PUBLIC_BASE_URL=https://localhost:8443`.
+Исходники интерфейса — [`gateway/frontend`](gateway/frontend). Сборка и проверка
+Svelte выполняются внутри Docker при сборке gateway; Node.js и npm на хосте
+не нужны. Чтобы применить только изменения интерфейса и gateway:
+
+```sh
+docker compose up -d --build --no-deps gateway
+```
+
+Если Compose установлен отдельной командой, используйте `docker-compose`.
+Готовые HTML/CSS/JS раздаёт gateway; дополнительного контейнера нет.
+
+Несекретные параметры находятся в `.env` (шаблон — `.env.example`). Если порт 80
+занят, например, задайте `HTTP_PORT=8080` и `PUBLIC_BASE_URL=http://localhost:8080`.
 Один `PUBLIC_BASE_URL` используется и для ссылок секретов, и для писем.
 `MAILPIT_PORT` меняет локальный порт интерфейса Mailpit.
 
@@ -49,8 +65,6 @@ Docker secrets. Auth получает приватный RSA-ключ, gateway �
 пары; secrets получает только мастер-ключ AES. Каждый процесс получает только
 нужные ему секреты. Каталог на хосте имеет права 0700, файлы читаются UID 65532
 контейнеров. `make init` сохраняет существующие файлы и проверяет соответствие JWT-ключей.
-Для настоящего домена замените `.secrets/tls_certificate.pem` и
-`.secrets/tls_private_key.pem` своим сертификатом и ключом.
 
 Общий Compose использует отдельный проект `simple-vault-stack`. Он не изменяет
 контейнеры, ключи и volumes автономных стеков в подкаталогах; их данные
@@ -58,13 +72,13 @@ Docker secrets. Auth получает приватный RSA-ключ, gateway �
 После создания БД или RabbitMQ простая замена файла пароля не меняет пароль
 в хранилище; мастер-ключ нужен для расшифровки уже сохранённых секретов.
 
-Снаружи опубликован только HTTPS gateway; интерфейс Mailpit привязан к loopback
+Снаружи опубликован только HTTP gateway; интерфейс Mailpit привязан к loopback
 для локальной проверки писем. Порты auth, secrets, обеих БД, Redis, AMQP и SMTP
 на хост не публикуются. Сегментация описана целиком в `docker-compose.yml`:
 
 | Сеть | Участники |
 | --- | --- |
-| `edge` | gateway; опубликован HTTPS |
+| `edge` | gateway; опубликован HTTP |
 | `gw-auth` | gateway, auth |
 | `gw-secrets` | gateway, secrets |
 | `auth-data` | auth, postgres-auth |

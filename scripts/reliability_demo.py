@@ -34,9 +34,9 @@ def settings():
 
 
 ENV = settings()
-BASE = (os.getenv("PUBLIC_BASE_URL") or ENV.get("PUBLIC_BASE_URL", "https://localhost")).rstrip("/")
+BASE = (os.getenv("PUBLIC_BASE_URL") or ENV.get("PUBLIC_BASE_URL", "http://localhost")).rstrip("/")
 MAILPIT = "http://127.0.0.1:" + os.getenv("MAILPIT_PORT", ENV.get("MAILPIT_PORT", "8025"))
-TLS = ssl.create_default_context(cafile=str(ROOT / ".secrets/tls_certificate.pem"))
+TLS = ssl.create_default_context(cafile=str(ROOT / ".secrets/tls_certificate.pem")) if urllib.parse.urlsplit(BASE).scheme == "https" else None
 
 
 def step(text):
