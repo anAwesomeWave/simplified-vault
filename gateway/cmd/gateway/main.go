@@ -15,6 +15,7 @@ import (
 	"simple-vault/gateway/internal/app"
 	"simple-vault/gateway/internal/auth"
 	"simple-vault/gateway/internal/config"
+	"simple-vault/gateway/internal/frontend"
 	"simple-vault/gateway/internal/gateway"
 	"simple-vault/gateway/internal/ratelimit"
 )
@@ -66,7 +67,11 @@ func run(logger *slog.Logger) error {
 	}
 	handler := gateway.New(cfg.AuthURL, cfg.SecretsURL, verifier, ratelimit.New(cfg.LoginLimit, time.Minute), logger)
 	defer handler.CloseIdleConnections()
-	server := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
+	var routes http.Handler = handler
+	if directory := os.Getenv("FRONTEND_DIR"); directory != "" {
+		routes = frontend.New(directory, routes)
+	}
+	server := &http.Server{Addr: cfg.HTTPAddr, Handler: routes, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return app.Serve(ctx, server, listener, 15*time.Second, logger)

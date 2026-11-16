@@ -30,9 +30,9 @@ def settings():
 class Smoke:
     def __init__(self):
         env = settings()
-        self.base = (os.getenv("SMOKE_BASE_URL") or os.getenv("PUBLIC_BASE_URL") or env.get("PUBLIC_BASE_URL", "https://localhost")).rstrip("/")
+        self.base = (os.getenv("SMOKE_BASE_URL") or os.getenv("PUBLIC_BASE_URL") or env.get("PUBLIC_BASE_URL", "http://localhost")).rstrip("/")
         self.mailpit = os.getenv("SMOKE_MAILPIT_URL", "http://127.0.0.1:" + os.getenv("MAILPIT_PORT", env.get("MAILPIT_PORT", "8025"))).rstrip("/")
-        self.tls = ssl.create_default_context(cafile=str(ROOT / ".secrets/tls_certificate.pem"))
+        self.tls = ssl.create_default_context(cafile=str(ROOT / ".secrets/tls_certificate.pem")) if urllib.parse.urlsplit(self.base).scheme == "https" else None
         self.deadline = time.monotonic() + 85  # Reserve five seconds for API cleanup.
         self.cleanup_deadline = self.deadline + 5
         self.suffix = uuid.uuid4().hex

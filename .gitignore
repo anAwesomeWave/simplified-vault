@@ -2,3 +2,5 @@
 /.secrets/
 /scripts/__pycache__/
 .DS_Store
+/gateway/frontend/node_modules/
+/gateway/frontend/dist/

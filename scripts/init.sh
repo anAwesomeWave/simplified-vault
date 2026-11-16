@@ -45,21 +45,11 @@ for name in postgres_auth_password postgres_secrets_password rabbitmq_password r
   fi
 done
 
-certificate=.secrets/tls_certificate.pem
-tls_key=.secrets/tls_private_key.pem
-if [ ! -f "$certificate" ] && [ ! -f "$tls_key" ]; then
-  openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 365 \
-    -keyout "$tls_key" -out "$certificate" -subj /CN=localhost \
-    -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' 2>/dev/null
-elif [ ! -f "$certificate" ] || [ ! -f "$tls_key" ]; then
-  echo 'Restore the missing TLS certificate/key; existing files were preserved.' >&2
-  exit 1
-fi
 # Compose bind-mounts secret files as-is; applications run as UID 65532.
 # The containing host directory remains private (0700).
 chmod 444 "$private" "$public" .secrets/master_key \
   .secrets/postgres_auth_password .secrets/postgres_secrets_password \
-  .secrets/rabbitmq_password .secrets/rabbitmq_erlang_cookie "$certificate" "$tls_key"
+  .secrets/rabbitmq_password .secrets/rabbitmq_erlang_cookie
 if [ ! -f .env ]; then
   cp .env.example .env
 fi

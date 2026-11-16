@@ -3,6 +3,8 @@ API gateway на Go для `simple-vault`: проверка JWT, проксир�
 
 | Маршрут | Поведение |
 | --- | --- |
+| `GET /`, `GET /assets/*` | Svelte-интерфейс, если задан `FRONTEND_DIR` (в Docker — `/frontend`) |
+| `GET /secrets/{id}` с `Accept: text/html` | Интерфейс по ссылке из письма; запросы JSON проходят обычную JWT-проверку |
 | `POST /auth/register` | Передача запроса в `AUTH_URL` без JWT |
 | `POST /auth/login` | Передача в `AUTH_URL`, по умолчанию не более 5 запросов в минуту с IP; затем 429 |
 | Восемь операций `/secrets` | Проверка JWT и передача в `SECRETS_URL` |
@@ -68,3 +70,9 @@ Go требует версии 1.26+. При SIGINT/SIGTERM HTTP-запроса�
 
 Swagger UI сервиса secrets описывает внутренние заголовки gateway → secrets,
 а внешний клиент передаёт gateway только Bearer JWT.
+
+Исходники интерфейса находятся в `frontend/`. Dockerfile собирает и проверяет
+Svelte в отдельном этапе с Node.js, затем копирует только готовую статику в
+финальный образ. В нём нет Node.js, npm и исходников интерфейса. Для локального
+Go-запуска можно задать `FRONTEND_DIR` с путём к готовым статическим файлам;
+без этой переменной gateway работает только как API.
